@@ -1,4 +1,4 @@
-main() :: i32 {
-    i32 x = 34 + 35;
-    return 0;
+main :: i32 {
+    x:i32 = 35;
+    return 2;
 }
