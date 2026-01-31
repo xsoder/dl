@@ -3,9 +3,9 @@
 import sys, subprocess, os
 
 SYM_TOK = ['+', '-', '*', '/', '(', ')', '>', '<', '=', ':', ';', '{', '}']
-TYPE_TOK = ['i32', 'i8', 'i16', 'i64']
+TYPE_TOK = ['i32', 'i8', 'i16', 'i64', 'u32', 'u8', 'u16', 'u64' ]
 KEY_TOK = ['main', 'return']
-
+OP_TOK =  [ '+', '-', '*']
 class CompileError(Exception):
     pass
 
@@ -87,9 +87,9 @@ class Parser:
         tok = self.peek()
         if tok is None:
             self.error("unexpected end of file")
-        if typ and tok.typ != typ:
+        elif typ and tok.typ != typ:
             self.error(f"expected {typ}, got {tok.typ}", tok)
-        if val and tok.val != val:
+        elif val and tok.val != val:
             self.error(f"expected '{val}', got '{tok.val}'", tok)
         self.pos += 1
         return tok
@@ -106,7 +106,7 @@ class Parser:
 
     def parse_block(self):
         stmts = []
-        while self.peek().val != '}':
+        while self.peek() and self.peek().val != '}':
             stmts.append(self.parse_statement())
         return stmts
 
@@ -149,6 +149,17 @@ class Parser:
         return Return(expr)
 
     def parse_expr(self):
+        lhs = self.parse_prim()
+
+        # TODO: More binary operations and Typechecks
+        while self.peek() and self.peek().typ == 'SYM' and self.peek().val in OP_TOK:
+            op = self.consume('SYM').val
+            rhs = self.parse_prim()
+            lhs = BinaryOp(lhs, op, rhs)
+
+        return lhs
+
+    def parse_prim(self):
         tok = self.peek()
 
         if tok.typ == 'NUM':
@@ -187,6 +198,13 @@ class Return:
     def __init__(self, expr):
         self.expr = expr
 
+class BinaryOp:
+    def __init__(self, lhs, op, rhs):
+        self.lhs = lhs
+        self.rhs = rhs
+        self.op = op
+        self.typ = None
+
 class CodeGen:
     def __init__(self, filename='a.asm'):
         self.out = []
@@ -208,6 +226,8 @@ class CodeGen:
             self.generate_var(node)
         elif isinstance(node, IntLiteral):
             self.generate_intlit(node)
+        elif isinstance(node, BinaryOp):
+            self.generate_binop(node)
         else:
             assert False, "Unreachable"
 
@@ -219,44 +239,58 @@ class CodeGen:
         self.emit("main:")
         self.emit("        push rbp")
         self.emit("        mov rbp, rsp")
-
+        # TODO: Stack global Alloc not implemented.
         for stmt in fn.body:
             self.generate(stmt)
 
         self.emit("        pop rbp")
         self.emit("        ret\n")
     def generate_vardec(self, vardecl):
-        offset = self.offset
         if vardecl.typ == 'i8' or vardecl.typ == 'u8':
-            offset += 1
+            size, word = 1, "BYTE"
         elif vardecl.typ == 'i16' or vardecl.typ == 'u16':
-            offset += 2
+            size, word = 2, "WORD"
         elif vardecl.typ == 'i32' or vardecl.typ == 'u32':
-            offset += 4
+            size, word = 4, "DWORD"
         elif vardecl.typ == 'u64' or vardecl.typ == 'i64':
-            offset += 8
+            size, word = 8, "QWORD"
         else:
-            offset += 1
+            size, word = 1, "WORD"
 
-        if isinstance(vardecl.expr, IntLiteral):
-            self.emit(f"        mov DWORD [rbp-{offset}], {vardecl.expr.val}")
-        else:
-            print(f"{self.filename}:{self.line}: ERROR: Could not get integer literal {ret.val}")
-            exit(1)
-            
-    def generate_var(self, vardecl):
-        self.emit(f"        ;; TODO: Not implemented")
+        self.offset += size
+        offset = self.offset
+
+        self.sym[vardecl.name] = offset
+        self.generate(vardecl.expr)
+        self.emit(f"        mov {word} [rbp-{offset}], eax")
+
+    def generate_var(self, var):
+        offset = self.sym[var.val]
+        self.emit("")
+        self.emit(f"        mov eax, DWORD [rbp-{offset}]")
 
     def generate_intlit(self, intlit):
-        self.emit(f"        ;; TODO: Not implemented")
+        self.emit("")
+        self.emit(f"        mov eax, {intlit.val}")
 
     def generate_return(self, retval):
-        ret = retval.expr
-        if isinstance(retval.expr, IntLiteral):
-            self.emit(f"        mov eax, {ret.val}")
+        self.generate(retval.expr)
+
+    def generate_binop(self, expr):
+        self.generate(expr.lhs)
+        self.emit(f"        push rax")
+        self.generate(expr.rhs)
+        self.emit(f"        pop rbx")
+
+        if expr.op == '+':
+            self.emit(f"        add eax, ebx")
+        elif expr.op == '-':
+            self.emit(f"        sub ebx, eax")
+            self.emit(f"        mov eax, ebx")
         else:
-            print(f"{self.filename}:{self.line}: ERROR: Could not get integer literal {ret.val}")
-            exit(1)
+            self.emit(f"       ;;Unimplemented")
+
+
     def write_file(self):
         with open(self.filename, 'w') as f:
             f.write('\n'.join(self.out))
@@ -278,6 +312,8 @@ def print_ast(node, indent=0):
         print(f"{p}Variable {node.val}")
     elif isinstance(node, IntLiteral):
         print(f"{p}IntLiteral {node.val}")
+    elif isinstance(node, BinaryOp):
+        print(f"{p}Binaryop {node.val}:{node.typ}")
 
 def usage():
     print("USAGE: dl <file>")
