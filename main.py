@@ -245,24 +245,10 @@ class CodeGen:
             exit(1)
             
     def generate_var(self, vardecl):
-        offset = self.offset
-        if vardecl.typ == 'i8' or vardecl.typ == 'u8':
-            offset += 1
-        elif vardecl.typ == 'i16' or vardecl.typ == 'u16':
-            offset += 2
-        elif vardecl.typ == 'i32' or vardecl.typ == 'u32':
-            offset += 4
-        elif vardecl.typ == 'u64' or vardecl.typ == 'i64':
-            offset += 8
-        else:
-            offset += 1
-
-        if isinstance(vardecl.expr, IntLiteral):
-            self.emit(f"        mov DWORD [rbp-{offset}], {vardecl.expr.val}")
+        self.emit(f"        ;; TODO: Not implemented")
 
     def generate_intlit(self, intlit):
-        # self.emit(f"        mov DWORD [rbp-{byte}], {intlit.val}")
-        self.emit(f"        ;; TODO: ")
+        self.emit(f"        ;; TODO: Not implemented")
 
     def generate_return(self, retval):
         ret = retval.expr
