@@ -3,7 +3,7 @@
 import sys, subprocess, os
 
 SYM_TOK = ['+', '-', '*', '/', '(', ')', '>', '<', '=', ':', ';', '{', '}']
-TYPE_TOK = ['i32']
+TYPE_TOK = ['i32', 'i8', 'i16', 'i64']
 KEY_TOK = ['main', 'return']
 
 class CompileError(Exception):
@@ -191,6 +191,8 @@ class CodeGen:
     def __init__(self, filename='a.asm'):
         self.out = []
         self.filename = filename
+        self.sym = {}
+        self.offset = 0
 
     def emit(self, line):
         self.out.append(line)
@@ -208,7 +210,7 @@ class CodeGen:
             self.generate_intlit(node)
         else:
             assert False, "Unreachable"
-            
+
     def generate_func(self, fn):
         self.emit("format ELF64")
         self.emit("public main")
@@ -221,23 +223,59 @@ class CodeGen:
         for stmt in fn.body:
             self.generate(stmt)
 
-        self.emit("        mov eax, 0")
         self.emit("        pop rbp")
         self.emit("        ret\n")
     def generate_vardec(self, vardecl):
-        self.emit("        ;; --TODO--Unimplemnted vardecl")
-    def generate_var(self, vardecl):
-        self.emit("        ;; --TODO--Unimplemnted var")
-    def generate_intlit(self, intlit):
-        self.emit("        ;; --TODO--Unimplemnted intliteral")
-    def generate_return(self, retval):
-        self.emit("        ;; --TODO--Unimplemnted return")
+        offset = self.offset
+        if vardecl.typ == 'i8' or vardecl.typ == 'u8':
+            offset += 1
+        elif vardecl.typ == 'i16' or vardecl.typ == 'u16':
+            offset += 2
+        elif vardecl.typ == 'i32' or vardecl.typ == 'u32':
+            offset += 4
+        elif vardecl.typ == 'u64' or vardecl.typ == 'i64':
+            offset += 8
+        else:
+            offset += 1
 
+        if isinstance(vardecl.expr, IntLiteral):
+            self.emit(f"        mov DWORD [rbp-{offset}], {vardecl.expr.val}")
+        else:
+            print(f"{self.filename}:{self.line}: ERROR: Could not get integer literal {ret.val}")
+            exit(1)
+            
+    def generate_var(self, vardecl):
+        offset = self.offset
+        if vardecl.typ == 'i8' or vardecl.typ == 'u8':
+            offset += 1
+        elif vardecl.typ == 'i16' or vardecl.typ == 'u16':
+            offset += 2
+        elif vardecl.typ == 'i32' or vardecl.typ == 'u32':
+            offset += 4
+        elif vardecl.typ == 'u64' or vardecl.typ == 'i64':
+            offset += 8
+        else:
+            offset += 1
+
+        if isinstance(vardecl.expr, IntLiteral):
+            self.emit(f"        mov DWORD [rbp-{offset}], {vardecl.expr.val}")
+
+    def generate_intlit(self, intlit):
+        # self.emit(f"        mov DWORD [rbp-{byte}], {intlit.val}")
+        self.emit(f"        ;; TODO: ")
+
+    def generate_return(self, retval):
+        ret = retval.expr
+        if isinstance(retval.expr, IntLiteral):
+            self.emit(f"        mov eax, {ret.val}")
+        else:
+            print(f"{self.filename}:{self.line}: ERROR: Could not get integer literal {ret.val}")
+            exit(1)
     def write_file(self):
         with open(self.filename, 'w') as f:
             f.write('\n'.join(self.out))
             return self.filename
-        
+
 def print_ast(node, indent=0):
     p = ' ' * indent
     if isinstance(node, Function):
@@ -263,8 +301,13 @@ def compilation(inputfile, objfile='a.o', outputfile='a.out'):
     if inputfile == None:
         usage()
         exit(1)
-    subprocess.run(['fasm', inputfile, objfile])
-    subprocess.run(['gcc', objfile, '-o', outputfile])
+    cmd = ['fasm', inputfile, objfile]
+    print(f"CMD: {cmd}")
+    subprocess.run(cmd)
+
+    cmd = ['gcc', objfile, '-o', outputfile]
+    print(f"CMD: {cmd}")
+    subprocess.run(cmd)
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:

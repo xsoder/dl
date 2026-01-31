@@ -1,4 +1,5 @@
 main :: i32 {
     x:i32 = 35;
-    return 2;
+    x:i64 = 35;
+    return 0;
 }
