@@ -2,10 +2,11 @@
 
 import sys, subprocess, os
 
-SYM_TOK = ['+', '-', '*', '/', '(', ')', '>', '<', '=', ':', ';', '{', '}']
+SYM_TOK  = ['+', '-', '*', '/', '(', ')', '>', '<', '=', ':', ';', '{', '}']
 TYPE_TOK = ['i32', 'i8', 'i16', 'i64', 'u32', 'u8', 'u16', 'u64' ]
-KEY_TOK = ['main', 'return']
-OP_TOK =  [ '+', '-', '*']
+KEY_TOK  = ['main', 'return', 'extern']
+OP_TOK   = [ '+', '-', '*']
+
 class CompileError(Exception):
     pass
 
@@ -114,9 +115,18 @@ class Parser:
         tok = self.peek()
         if tok.typ == 'VAR':
             return self.parse_decl()
+        if tok.typ == 'KEY' and tok.val == 'extern':
+            return self.parse_extern()
         if tok.typ == 'KEY' and tok.val == 'return':
             return self.parse_return()
         self.error("invalid statement", tok)
+
+    def parse_extern(self):
+        self.consume('KEY', 'extern')
+        name = self.consume('VAR')
+        self.consume('SYM',';')
+        self.sym[name.val] = 'extern'
+        return ExternDecl(name.val)
 
     def parse_decl(self):
         name = self.consume('VAR')
@@ -178,6 +188,10 @@ class Function:
     def __init__(self, body):
         self.body = body
 
+class ExternDecl:
+    def __init__(self, name):
+        self.name = name
+
 class IntLiteral:
     def __init__(self, val):
         self.val = val
@@ -228,12 +242,18 @@ class CodeGen:
             self.generate_intlit(node)
         elif isinstance(node, BinaryOp):
             self.generate_binop(node)
+        elif isinstance(node, ExternDecl):
+            pass
         else:
             assert False, "Unreachable"
 
     def generate_func(self, fn):
         self.emit("format ELF64")
         self.emit("public main")
+        for stmt in fn.body:
+            if isinstance(stmt, ExternDecl):
+                self.emit(f"extrn {stmt.name}")
+
         self.emit("section '.text' executable")
         self.emit("")
         self.emit("main:")
@@ -241,7 +261,8 @@ class CodeGen:
         self.emit("        mov rbp, rsp")
         # TODO: Stack global Alloc not implemented.
         for stmt in fn.body:
-            self.generate(stmt)
+            if not isinstance(stmt, ExternDecl):
+                self.generate(stmt)
 
         self.emit("        pop rbp")
         self.emit("        ret\n")
@@ -289,7 +310,6 @@ class CodeGen:
             self.emit(f"        mov eax, ebx")
         else:
             self.emit(f"       ;;Unimplemented")
-
 
     def write_file(self):
         with open(self.filename, 'w') as f:

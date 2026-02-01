@@ -1,4 +1,5 @@
 main :: i32 {
-    x: i32 = 35 + 34;
-    return x;
+    extern printf;
+    x: i32 = 99;
+    return 0;
 }
