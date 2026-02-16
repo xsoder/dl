@@ -461,13 +461,24 @@ def print_ast(node, indent=0):
         print(f"{p}Binaryop {node.val}:{node.typ}")
 
 def usage():
-    print("USAGE: dl <file>")
+    print("USAGE: dl <file> <-r>")
     sys.exit(1)
 
-def compilation(inputfile, objfile='a.o', outputfile='a.out'):
+def compilation(inputfile, run, objfile='a.o', outputfile='a.out'):
+    running = False
     if inputfile == None:
         usage()
         exit(1)
+    print(run)
+    if run == None:
+        running = False
+    elif run == "-run":
+        running = True
+    else:
+        usage()
+        print(f"Expected -run/ --run/ -r: But got {run}")
+        exit(1)
+
     cmd = ['fasm', inputfile, objfile]
     print(f"CMD: {cmd}")
     subprocess.run(cmd)
@@ -475,6 +486,12 @@ def compilation(inputfile, objfile='a.o', outputfile='a.out'):
     cmd = ['gcc', objfile, '-o', outputfile, '-no-pie']
     print(f"CMD: {cmd}")
     subprocess.run(cmd)
+
+    print(running)
+    if running == True:
+        cmd = [f'./{outputfile}']
+        print(f"CMD: {cmd}")
+        subprocess.run(cmd)
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
@@ -484,7 +501,8 @@ if __name__ == '__main__':
         cd = CodeGen()
         cd.generate(ast)
         inputfile = cd.write_file()
-        compilation(inputfile)
+        run = sys.argv[2]
+        compilation(inputfile, run)
 
     except CompileError as e:
         print(e)
