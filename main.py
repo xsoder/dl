@@ -20,6 +20,7 @@ def tokenize(input_string):
     toks = []
     current = ""
     line = 1
+    i = 0
 
     def emit_current():
         nonlocal current
@@ -35,17 +36,50 @@ def tokenize(input_string):
             toks.append(Token('VAR', current, line))
         current = ""
 
-    for ch in input_string:
+    while i < len(input_string):
+        ch = input_string[i]
+
         if ch == '\n':
             emit_current()
             line += 1
-        elif ch in SYM_TOK:
+            i += 1
+
+        elif ch == '"':
+            emit_current()
+            i += 1
+            string = ""
+
+            while i < len(input_string) and input_string[i] != '"':
+                if input_string[i] == '\\':
+                    i += 1
+                    if input_string[i] == 'n':
+                        string += '\n'
+                    elif input_string[i] == 't':
+                        string += '\t'
+                    else:
+                        string += input_string[i]
+                else:
+                    string += input_string[i]
+                i += 1
+
+            if i >= len(input_string):
+                raise CompileError(f"Unterminated string literal on line {line}")
+
+            toks.append(Token('STR', string, line))
+            i += 1
+
+        elif ch in SYM_TOK or ch == ',':
             emit_current()
             toks.append(Token('SYM', ch, line))
+            i += 1
+
         elif ch.isspace():
             emit_current()
+            i += 1
+
         else:
             current += ch
+            i += 1
 
     emit_current()
     return toks
@@ -66,7 +100,7 @@ def parse_file(file_path):
     tokens = tokenize(content)
     find_entry(tokens, file_path)
     parser = Parser(tokens, file_path)
-    return parser.parse_function()
+    return parser.parse_program()
 
 class Parser:
     def __init__(self, tokens, file_path):
@@ -95,6 +129,18 @@ class Parser:
         self.pos += 1
         return tok
 
+    def parse_program(self):
+        top_level = []
+        while self.peek() and self.peek().val != 'main':
+            if self.peek().typ == 'KEY' and self.peek().val == 'extern':
+                decl = self.parse_extern()
+                top_level.append(decl)
+            else:
+                self.error("unexpected top-level statement (only 'extern' allowed before 'main')", self.peek())
+
+        func = self.parse_function()
+        return Function(top_level + func.body)
+
     def parse_function(self):
         self.consume('KEY', 'main')
         self.consume('SYM', ':')
@@ -114,12 +160,34 @@ class Parser:
     def parse_statement(self):
         tok = self.peek()
         if tok.typ == 'VAR':
-            return self.parse_decl()
+            if self.tokens[self.pos + 1].val == ':':
+                return self.parse_decl()
+            elif self.tokens[self.pos + 1].val == '(':
+                stmt = self.parse_call()
+                self.consume('SYM', ';')
+                return stmt
+
         if tok.typ == 'KEY' and tok.val == 'extern':
             return self.parse_extern()
         if tok.typ == 'KEY' and tok.val == 'return':
             return self.parse_return()
         self.error("invalid statement", tok)
+
+    def parse_call(self):
+        name = self.consume('VAR')
+        self.consume('SYM','(')
+
+        args = []
+
+        if self.peek().val != ')':
+            args.append(self.parse_expr())
+
+            while self.peek().val == ',':
+                self.consume('SYM',',')
+                args.append(self.parse_expr())
+
+        self.consume('SYM',')')
+        return Call(name.val, args)
 
     def parse_extern(self):
         self.consume('KEY', 'extern')
@@ -182,11 +250,25 @@ class Parser:
                 self.error(f"undeclared variable '{tok.val}'", tok)
             return Variable(tok.val, self.sym[tok.val])
 
+        if tok.typ == 'STR':
+            self.consume('STR')
+            return StringLiteral(tok.val)
+
         self.error("invalid expression", tok)
 
 class Function:
     def __init__(self, body):
         self.body = body
+
+class StringLiteral:
+    def __init__(self, val):
+        self.val = val
+        self.typ = 'u8*'
+
+class Call:
+    def __init__(self, name, args):
+        self.name = name
+        self.args = args
 
 class ExternDecl:
     def __init__(self, name):
@@ -223,8 +305,10 @@ class CodeGen:
     def __init__(self, filename='a.asm'):
         self.out = []
         self.filename = filename
+        self.stringlit = []
         self.sym = {}
         self.offset = 0
+        self.strcount = 0 # This is to make unique label for d/t string
 
     def emit(self, line):
         self.out.append(line)
@@ -242,10 +326,35 @@ class CodeGen:
             self.generate_intlit(node)
         elif isinstance(node, BinaryOp):
             self.generate_binop(node)
+        elif isinstance(node, Call):
+            self.generate_call(node)
+        elif isinstance(node, StringLiteral):
+            self.generate_string(node)
         elif isinstance(node, ExternDecl):
             pass
         else:
             assert False, "Unreachable"
+
+    def generate_string(self, strlit):
+        label = f"str_{self.strcount}"
+        self.strcount += 1
+
+        self.stringlit.append((label, strlit.val))
+        self.emit("")
+        self.emit(f"        lea rax, [{label}]")
+
+    def generate_call(self, call):
+        if len(call.args) > 6:
+            pass
+
+        reg_order = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
+
+        for i, arg in enumerate(call.args):
+            self.generate(arg)
+            if i < len(reg_order):
+                self.emit(f"        mov {reg_order[i]}, rax")
+
+        self.emit(f"        call {call.name}")
 
     def generate_func(self, fn):
         self.emit("format ELF64")
@@ -266,6 +375,22 @@ class CodeGen:
 
         self.emit("        pop rbp")
         self.emit("        ret\n")
+        if self.stringlit:
+            self.emit("section '.data' writeable")
+            for label, val in self.stringlit:
+                data_list = []
+                i = 0
+                while i < len(val):
+                    ch = val[i]
+                    if ch == '\n':
+                        data_list.append('10')
+                    elif ch == '\t':
+                        data_list.append('9')
+                    else:
+                        data_list.append(f"'{ch}'")
+                    i += 1
+                data_list.append('0')
+                self.emit(f"{label}: db {','.join(data_list)}")
     def generate_vardec(self, vardecl):
         if vardecl.typ == 'i8' or vardecl.typ == 'u8':
             size, word = 1, "BYTE"
@@ -347,7 +472,7 @@ def compilation(inputfile, objfile='a.o', outputfile='a.out'):
     print(f"CMD: {cmd}")
     subprocess.run(cmd)
 
-    cmd = ['gcc', objfile, '-o', outputfile]
+    cmd = ['gcc', objfile, '-o', outputfile, '-no-pie']
     print(f"CMD: {cmd}")
     subprocess.run(cmd)
 

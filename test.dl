@@ -1,5 +1,6 @@
+extern printf;
 main :: i32 {
-    extern printf;
-    x: i32 = 99;
+    x: i32 = 34 + 35;
+    printf("Urmom is a pig: %d\n", x);
     return 0;
 }
